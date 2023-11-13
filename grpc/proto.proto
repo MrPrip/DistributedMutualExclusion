@@ -1,5 +1,0 @@
-syntax = "proto3";
-
-package mutual;
-
-option go_package = "grpc/proto";

@@ -1,0 +1,23 @@
+
+syntax = "proto3";
+
+package proto;
+option go_package = "proto/proto";
+
+message RequestAccess {
+    int32 Id = 1;
+    int64 timestamp = 2;
+}
+
+message ReplyToRequest {
+    int32 Id = 1;
+    int64 TimeStamp = 2;
+    bool CanEnter = 3;
+}
+
+message empty {}
+
+service P2P {
+    rpc Request(RequestAccess) returns (ReplyToRequest);
+    rpc Reply(ReplyToRequest) returns (empty);
+}
