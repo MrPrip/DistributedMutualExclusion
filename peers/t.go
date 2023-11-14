@@ -138,8 +138,9 @@ func (p *peer) RequestAccessToCS() {
 	
 
 	if p.replyCount == p.quorumSize {
-		p.gototCS()
 		p.wantToCS = false
+		p.gototCS()
+		
 		// 5001 -> CS
 		// 5002 -> 2=ja
 		// 5003 -> 2=ja
@@ -165,10 +166,7 @@ func (p *peer) Request(ctx context.Context, req *proto.RequestAccess) (*proto.Re
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.inCS {
-		canSenderEnter = false
-		p.queue[int(req.Id)] = int(req.Id)+portZerovalue
-	} else if p.wantToCS && p.canIncommingEnterCS(req.Timestamp, req.Id) {
+	if p.inCS || (p.wantToCS && p.canIncommingEnterCS(req.Timestamp, req.Id)) {
 		canSenderEnter = false
 		p.queue[int(req.Id)] = int(req.Id)+portZerovalue
 	} else {
