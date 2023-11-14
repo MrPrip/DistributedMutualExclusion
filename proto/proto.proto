@@ -12,7 +12,6 @@ message RequestAccess {
 message ReplyToRequest {
     int32 Id = 1;
     int64 TimeStamp = 2;
-    bool CanEnter = 3;
 }
 
 message empty {}
