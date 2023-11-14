@@ -1,15 +1,10 @@
 package main
 
 import (
-	//"bufio"
 	"context"
 	"flag"
 	"log"
 	"net"
-	"sync"
-
-	//"math/rand"
-	//"os"
 	"strconv"
 	"time"
 
@@ -29,15 +24,15 @@ type peer struct {
 	proto.UnimplementedP2PServer
 	id         int
 	port       int
-	lamport    int
+	peerTime   int
 	wantToCS   bool
 	replyCount int
 	inCS       bool
 	clients    map[int]proto.P2PClient
 	queue      map[int]int
+	higestSeen int
 	quorumSize int
 	ctx        context.Context
-	mu         sync.Mutex
 }
 
 func main() {
@@ -49,14 +44,14 @@ func main() {
 	p := &peer{
 		id:         *clientID,
 		port:       *clientID + portZerovalue,
-		lamport:    0,
+		peerTime:   0,
 		wantToCS:   false,
 		replyCount: 0,
 		clients:    make(map[int]proto.P2PClient),
 		queue:      make(map[int]int),
+		higestSeen: 0,
 		quorumSize: 0,
 		ctx:        ctx,
-		mu:         sync.Mutex{},
 	}
 
 	list, err := net.Listen("tcp", "localhost:"+strconv.Itoa(p.port))
@@ -89,21 +84,21 @@ func main() {
 			defer conn.Close()
 		}
 	}
-	
+
 	for {
-		//randomInt := rand.Intn(3)
-		//time.Sleep(time.Duration(randomInt) * time.Second)
 		p.RequestAccessToCS()
 	}
 }
 
 func (p *peer) RequestAccessToCS() {
-	log.Println("Trying again");
-	p.wantToCS = true
-
+	//log.Println("Trying to access critical sectoin");
+	if p.higestSeen > p.peerTime {
+		p.peerTime = p.higestSeen+1
+	}
+	//p.incrementTimer()
 	request := &proto.RequestAccess{
 		Id:        int32(p.id),
-		Timestamp: int64(p.lamport),
+		Timestamp: int64(p.peerTime),
 	}
 
 	for id, client := range p.clients {
@@ -118,85 +113,76 @@ func (p *peer) RequestAccessToCS() {
 			continue
 		}
 		if err != nil {
-			log.Println("something went wrong")
+			log.Println("Something went wrong")
 		}
-		
+
 		if reply.CanEnter {
 			p.replyCount++
-		}
+		} 
 	}
+	p.wantToCS = true
 	i := 0
-	for p.replyCount != p.quorumSize {
-		time.Sleep(1 * time.Second)
-		i++
-
-		// wait 5 seconds
-		if i == 5 {
-			break
-		}
-	}
-	
+			for {
+				time.Sleep(1 * time.Second)
+				i++
+				// wait 5 seconds
+				if i == 5 {
+					break
+				}
+			}
 
 	if p.replyCount == p.quorumSize {
 		p.wantToCS = false
 		p.gototCS()
-		
-		// 5001 -> CS
-		// 5002 -> 2=ja
-		// 5003 -> 2=ja
 		for _, clientID := range p.queue {
 			client := p.clients[clientID]
 			r := &proto.LateReplayMessage{
 				CanEnter: true,
 			}
+			time.Sleep(2*time.Second)
 			_, err := client.LateReply(p.ctx, r)
 			if err != nil {
 				log.Println("something went wrong")
 			}
 		}
-		
 		p.queue = make(map[int]int)
 	}
 	p.replyCount = 0
 }
 
 func (p *peer) Request(ctx context.Context, req *proto.RequestAccess) (*proto.ReplyToRequest, error) {
-	p.lamport++
+
 	canSenderEnter := false
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.inCS || (p.wantToCS && p.canIncommingEnterCS(req.Timestamp, req.Id)) {
 		canSenderEnter = false
-		p.queue[int(req.Id)] = int(req.Id)+portZerovalue
+		p.queue[int(req.Id)] = int(req.Id) + portZerovalue
 	} else {
 		canSenderEnter = true
 	}
 
 	reply := &proto.ReplyToRequest{
 		Id:        int32(p.id),
-		TimeStamp: int64(p.lamport),
+		TimeStamp: int64(p.peerTime),
 		CanEnter:  canSenderEnter,
 	}
 	return reply, nil
 }
 
-func (p *peer) LateReply(ctx context.Context, rep  *proto.LateReplayMessage) (*proto.Empty, error) {
+func (p *peer) LateReply(ctx context.Context, rep *proto.LateReplayMessage) (*proto.Empty, error) {
 	p.replyCount++
 	return &proto.Empty{}, nil
 }
 
 func (p *peer) canIncommingEnterCS(incomingTimestamp int64, incommingID int32) bool {
-	if incomingTimestamp < int64(p.lamport) || (incomingTimestamp == int64(p.lamport) && incommingID < int32(p.id)) {
+	if incomingTimestamp < int64(p.peerTime) || (incomingTimestamp == int64(p.peerTime) && incommingID < int32(p.id)) {
 		return true
 	}
+	p.higestSeen = int(incomingTimestamp)
 	return false
 }
 
 func (p *peer) gototCS() {
-	//p.mu.Lock()
-	//defer p.mu.Unlock()
-
 	p.inCS = true
 	log.Printf("%d Entered Critical section\n", p.id)
 	time.Sleep(2 * time.Second)
