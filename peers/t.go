@@ -92,57 +92,58 @@ func main() {
 
 func (p *peer) RequestAccessToCS() {
 	//log.Println("Trying to access critical sectoin");
+	p.wantToCS = true
 	if p.higestSeen > p.peerTime {
-		p.peerTime = p.higestSeen+1
+		p.peerTime = p.higestSeen
 	}
-	//p.incrementTimer()
+	p.peerTime++
+	
 	request := &proto.RequestAccess{
 		Id:        int32(p.id),
 		Timestamp: int64(p.peerTime),
 	}
-
+	
 	for id, client := range p.clients {
 		if client == nil {
 			log.Printf("Client with ID %d is nil, skipping...", id)
 			continue
 		}
-		reply, err := client.Request(p.ctx, request)
-
-		if reply == nil {
-			log.Println("Received nil reply from id:", id)
-			continue
-		}
-		if err != nil {
-			log.Println("Something went wrong")
-		}
+		reply, _ := client.Request(p.ctx, request)
+		log.Printf("Got reply from %d at time %d. Reply message %b", reply.Id, reply.TimeStamp, reply.CanEnter)
 
 		if reply.CanEnter {
 			p.replyCount++
-		} 
+		}
 	}
-	p.wantToCS = true
+	
 	i := 0
-			for {
-				time.Sleep(1 * time.Second)
-				i++
-				// wait 5 seconds
-				if i == 5 {
-					break
-				}
+	log.Println("Wating for alle replies")
+		for {
+			time.Sleep(1 * time.Second)
+			i++
+			// wait 2 seconds
+			if i == 2 {
+				break
 			}
+		}
 
 	if p.replyCount == p.quorumSize {
-		p.wantToCS = false
 		p.gototCS()
+		
+		if p.higestSeen > p.peerTime {
+			p.peerTime = p.higestSeen
+		}
+		p.peerTime++
+		p.wantToCS = false
 		for _, clientID := range p.queue {
+			log.Printf("Sending delayed replie to port %d", clientID)
 			client := p.clients[clientID]
 			r := &proto.LateReplayMessage{
 				CanEnter: true,
 			}
-			time.Sleep(2*time.Second)
 			_, err := client.LateReply(p.ctx, r)
 			if err != nil {
-				log.Println("something went wrong")
+				log.Println("Something went wrong")
 			}
 		}
 		p.queue = make(map[int]int)
@@ -153,7 +154,11 @@ func (p *peer) RequestAccessToCS() {
 func (p *peer) Request(ctx context.Context, req *proto.RequestAccess) (*proto.ReplyToRequest, error) {
 
 	canSenderEnter := false
-
+	if p.higestSeen > p.peerTime {
+		p.peerTime = p.higestSeen
+	}
+	p.peerTime++
+		
 	if p.inCS || (p.wantToCS && p.canIncommingEnterCS(req.Timestamp, req.Id)) {
 		canSenderEnter = false
 		p.queue[int(req.Id)] = int(req.Id) + portZerovalue
@@ -175,7 +180,7 @@ func (p *peer) LateReply(ctx context.Context, rep *proto.LateReplayMessage) (*pr
 }
 
 func (p *peer) canIncommingEnterCS(incomingTimestamp int64, incommingID int32) bool {
-	if incomingTimestamp < int64(p.peerTime) || (incomingTimestamp == int64(p.peerTime) && incommingID < int32(p.id)) {
+	if incomingTimestamp > int64(p.peerTime) || (incomingTimestamp == int64(p.peerTime) && incommingID < int32(p.id)) {
 		return true
 	}
 	p.higestSeen = int(incomingTimestamp)
