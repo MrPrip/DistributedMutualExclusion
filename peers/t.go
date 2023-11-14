@@ -7,7 +7,8 @@ import (
 	"log"
 	"net"
 	"sync"
-	"math/rand"
+
+	//"math/rand"
 	//"os"
 	"strconv"
 	"time"
@@ -31,11 +32,12 @@ type peer struct {
 	lamport    int
 	wantToCS   bool
 	replyCount int
-	inCS       bool 
+	inCS       bool
 	clients    map[int]proto.P2PClient
+	queue      map[int]int
 	quorumSize int
 	ctx        context.Context
-	mu         sync.Mutex 
+	mu         sync.Mutex
 }
 
 func main() {
@@ -51,12 +53,12 @@ func main() {
 		wantToCS:   false,
 		replyCount: 0,
 		clients:    make(map[int]proto.P2PClient),
+		queue:      make(map[int]int),
 		quorumSize: 0,
 		ctx:        ctx,
-		mu: sync.Mutex{},
+		mu:         sync.Mutex{},
 	}
 
-	
 	list, err := net.Listen("tcp", "localhost:"+strconv.Itoa(p.port))
 	if err != nil {
 		log.Fatalf("Failed to listen on port: %v", err)
@@ -87,112 +89,115 @@ func main() {
 			defer conn.Close()
 		}
 	}
-
 	
 	for {
-		randomInt := rand.Intn(2)
-		time.Sleep(time.Duration(randomInt) * time.Second)
+		//randomInt := rand.Intn(3)
+		//time.Sleep(time.Duration(randomInt) * time.Second)
 		p.RequestAccessToCS()
 	}
 }
 
-func (p *peer) Request(ctx context.Context, req *proto.RequestAccess) (*proto.ReplyToRequest, error) {
-	p.lamport++
-	
-	reply := &proto.ReplyToRequest{
-		Id:        int32(p.id),
-		TimeStamp: int64(p.lamport),
-	}
-
-	
-	responseCh := make(chan bool)
-
-	go func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		if !p.inCS || !p.wantToCS || p.canIncommingEnterCS(req.Timestamp, req.Id) {
-			responseCh <- true
-		} else {
-			responseCh <- false
-		}
-	}()
-
-	
-	select {
-	case granted := <-responseCh:
-		if granted {
-		
-			return reply, nil
-		} else {
-			
-			return nil, nil
-		}
-	case <-time.After(5 * time.Second):
-		
-		return nil, nil
-	}
-}
-
-
 func (p *peer) RequestAccessToCS() {
+	log.Println("Trying again");
 	p.wantToCS = true
+
 	request := &proto.RequestAccess{
 		Id:        int32(p.id),
 		Timestamp: int64(p.lamport),
 	}
-	p.lamport++
-	p.replyCount = 0
 
 	for id, client := range p.clients {
 		if client == nil {
 			log.Printf("Client with ID %d is nil, skipping...", id)
 			continue
 		}
-		go func(id int, client proto.P2PClient) {
-			reply, err := client.Request(p.ctx, request)
-			if reply == nil {
-				log.Println("Received nil reply from id:", id)
-				return
-			}
-			if err != nil {
-				log.Println("Error during Request call:", err)
-			}
-			
-			p.mu.Lock()
-			defer p.mu.Unlock()
+		reply, err := client.Request(p.ctx, request)
+
+		if reply == nil {
+			log.Println("Received nil reply from id:", id)
+			continue
+		}
+		if err != nil {
+			log.Println("something went wrong")
+		}
+		
+		if reply.CanEnter {
 			p.replyCount++
-		}(id, client)
+		}
 	}
+	i := 0
+	for p.replyCount != p.quorumSize {
+		time.Sleep(1 * time.Second)
+		i++
 
-	
-	for p.replyCount < p.quorumSize {
-		time.Sleep(100 * time.Millisecond)
-		log.Println("Waiting for replies...")
+		// wait 5 seconds
+		if i == 5 {
+			break
+		}
 	}
-
 	
+
 	if p.replyCount == p.quorumSize {
-		p.lamport++
 		p.gototCS()
 		p.wantToCS = false
+		// 5001 -> CS
+		// 5002 -> 2=ja
+		// 5003 -> 2=ja
+		for _, clientID := range p.queue {
+			client := p.clients[clientID]
+			r := &proto.LateReplayMessage{
+				CanEnter: true,
+			}
+			_, err := client.LateReply(p.ctx, r)
+			if err != nil {
+				log.Println("something went wrong")
+			}
+		}
+		
+		p.queue = make(map[int]int)
 	}
-
-	
+	p.replyCount = 0
 }
 
+func (p *peer) Request(ctx context.Context, req *proto.RequestAccess) (*proto.ReplyToRequest, error) {
+	p.lamport++
+	canSenderEnter := false
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.inCS {
+		canSenderEnter = false
+		p.queue[int(req.Id)] = int(req.Id)+portZerovalue
+	} else if p.wantToCS && p.canIncommingEnterCS(req.Timestamp, req.Id) {
+		canSenderEnter = false
+		p.queue[int(req.Id)] = int(req.Id)+portZerovalue
+	} else {
+		canSenderEnter = true
+	}
 
+	reply := &proto.ReplyToRequest{
+		Id:        int32(p.id),
+		TimeStamp: int64(p.lamport),
+		CanEnter:  canSenderEnter,
+	}
+	return reply, nil
+}
+
+func (p *peer) LateReply(ctx context.Context, rep  *proto.LateReplayMessage) (*proto.Empty, error) {
+	p.replyCount++
+	return &proto.Empty{}, nil
+}
 
 func (p *peer) canIncommingEnterCS(incomingTimestamp int64, incommingID int32) bool {
-    if incomingTimestamp < int64(p.lamport) || (incomingTimestamp == int64(p.lamport) && incommingID < int32(p.id)) {
-        return true
-    }
-    return false
+	if incomingTimestamp < int64(p.lamport) || (incomingTimestamp == int64(p.lamport) && incommingID < int32(p.id)) {
+		return true
+	}
+	return false
 }
 
 func (p *peer) gototCS() {
-	p.mu.Lock() 
-	defer p.mu.Unlock()
+	//p.mu.Lock()
+	//defer p.mu.Unlock()
 
 	p.inCS = true
 	log.Printf("%d Entered Critical section\n", p.id)

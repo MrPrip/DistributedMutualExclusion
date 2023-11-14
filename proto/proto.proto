@@ -12,11 +12,16 @@ message RequestAccess {
 message ReplyToRequest {
     int32 Id = 1;
     int64 TimeStamp = 2;
+    bool CanEnter = 3;
+}
+
+message LateReplayMessage {
+    bool CanEnter = 1;
 }
 
 message empty {}
 
 service P2P {
     rpc Request(RequestAccess) returns (ReplyToRequest);
-    rpc Reply(ReplyToRequest) returns (empty);
+    rpc LateReply(LateReplayMessage) returns (empty);
 }

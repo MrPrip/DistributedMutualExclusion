@@ -19,8 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	P2P_Request_FullMethodName = "/proto.P2P/Request"
-	P2P_Reply_FullMethodName   = "/proto.P2P/Reply"
+	P2P_Request_FullMethodName   = "/proto.P2P/Request"
+	P2P_LateReply_FullMethodName = "/proto.P2P/LateReply"
 )
 
 // P2PClient is the client API for P2P service.
@@ -28,7 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type P2PClient interface {
 	Request(ctx context.Context, in *RequestAccess, opts ...grpc.CallOption) (*ReplyToRequest, error)
-	Reply(ctx context.Context, in *ReplyToRequest, opts ...grpc.CallOption) (*Empty, error)
+	LateReply(ctx context.Context, in *LateReplayMessage, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type p2PClient struct {
@@ -48,9 +48,9 @@ func (c *p2PClient) Request(ctx context.Context, in *RequestAccess, opts ...grpc
 	return out, nil
 }
 
-func (c *p2PClient) Reply(ctx context.Context, in *ReplyToRequest, opts ...grpc.CallOption) (*Empty, error) {
+func (c *p2PClient) LateReply(ctx context.Context, in *LateReplayMessage, opts ...grpc.CallOption) (*Empty, error) {
 	out := new(Empty)
-	err := c.cc.Invoke(ctx, P2P_Reply_FullMethodName, in, out, opts...)
+	err := c.cc.Invoke(ctx, P2P_LateReply_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (c *p2PClient) Reply(ctx context.Context, in *ReplyToRequest, opts ...grpc.
 // for forward compatibility
 type P2PServer interface {
 	Request(context.Context, *RequestAccess) (*ReplyToRequest, error)
-	Reply(context.Context, *ReplyToRequest) (*Empty, error)
+	LateReply(context.Context, *LateReplayMessage) (*Empty, error)
 	mustEmbedUnimplementedP2PServer()
 }
 
@@ -73,8 +73,8 @@ type UnimplementedP2PServer struct {
 func (UnimplementedP2PServer) Request(context.Context, *RequestAccess) (*ReplyToRequest, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Request not implemented")
 }
-func (UnimplementedP2PServer) Reply(context.Context, *ReplyToRequest) (*Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Reply not implemented")
+func (UnimplementedP2PServer) LateReply(context.Context, *LateReplayMessage) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LateReply not implemented")
 }
 func (UnimplementedP2PServer) mustEmbedUnimplementedP2PServer() {}
 
@@ -107,20 +107,20 @@ func _P2P_Request_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	return interceptor(ctx, in, info, handler)
 }
 
-func _P2P_Reply_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReplyToRequest)
+func _P2P_LateReply_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LateReplayMessage)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(P2PServer).Reply(ctx, in)
+		return srv.(P2PServer).LateReply(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: P2P_Reply_FullMethodName,
+		FullMethod: P2P_LateReply_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(P2PServer).Reply(ctx, req.(*ReplyToRequest))
+		return srv.(P2PServer).LateReply(ctx, req.(*LateReplayMessage))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -137,8 +137,8 @@ var P2P_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _P2P_Request_Handler,
 		},
 		{
-			MethodName: "Reply",
-			Handler:    _P2P_Reply_Handler,
+			MethodName: "LateReply",
+			Handler:    _P2P_LateReply_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
